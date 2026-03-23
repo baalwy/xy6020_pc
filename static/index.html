@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script type="text/javascript" src="segment-display.js"></script>
+    <script type="text/javascript" src="logic.js"></script>
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <title>XY6020 Serial Controller</title>
+</head>
+
+<body onload="init()">
+
+    <center>
+        <div id="main-page">
+
+            <h1 style="font-size: 42px; color: gray">
+                ⚡ XY6020 Serial Controller | متحكم XY6020
+                <span id="connection-state" style="display: none; color: lightgreen;">&#10003;</span>
+            </h1>
+
+            <div class="lang-switcher">
+                <button class="small-button" onclick="setLang('en')">English</button>
+                <button class="small-button" onclick="setLang('ar')">العربية</button>
+            </div>
+
+            <!-- ─── Connection Panel ─── -->
+            <div class="connection-panel">
+                <span>🔌 Serial Connection | الاتصال التسلسلي</span>
+
+                <div class="connection-row">
+                    <label class="connection-label">Port | المنفذ:</label>
+                    <select id="port-select" class="connection-select" onchange="updatePortDescription()">
+                        <option value="">-- Select Port / اختر المنفذ --</option>
+                    </select>
+                    <button id="refresh-ports-btn" class="btn-refresh" onclick="refreshPorts()" title="Refresh ports">
+                        🔄 Refresh | تحديث
+                    </button>
+                </div>
+
+                <div class="connection-row">
+                    <label class="connection-label">Addr | العنوان:</label>
+                    <input id="slave-address" class="connection-input" type="number" value="1" min="1" max="247"
+                        title="Modbus Slave Address">
+
+                    <label class="connection-label">Baud | السرعة:</label>
+                    <select id="baudrate" class="connection-select" style="min-width: 120px;">
+                        <option value="9600">9600</option>
+                        <option value="19200">19200</option>
+                        <option value="38400">38400</option>
+                        <option value="57600">57600</option>
+                        <option value="115200" selected>115200</option>
+                    </select>
+                </div>
+
+                <div class="connection-row">
+                    <button id="connect-button" class="btn-connect" onclick="toggleConnection()">
+                        ⚡ Connect | اتصال
+                    </button>
+                </div>
+
+                <div id="connection-status" class="connection-status status-disconnected">
+                    Not connected | غير متصل
+                </div>
+                <div id="port-description" class="port-description"></div>
+                <div id="platform-info" class="port-description" style="margin-top: 2px; color: #556;"></div>
+            </div>
+
+            <br>
+
+            <!-- ─── Controls Section (disabled when not connected) ─── -->
+            <div id="controls-section" class="controls-disabled">
+
+                <!-- ON/OFF Buttons -->
+                <button class="my-button" id="on-button" onclick="setOutput(1)">ON | تشغيل الخرج</button>
+                <br>
+                <button class="my-button my-active-button" id="off-button" onclick="setOutput(0)">OFF | إيقاف الخرج</button>
+                <div class="output-help" id="output-help">
+                    Register 0x0012 (ONOFF): 1 = output enabled, 0 = output disabled | السجل 0x0012 (ONOFF): القيمة 1 تشغيل الخرج، والقيمة 0 إيقاف الخرج
+                </div>
+                <br>
+                <br>
+
+                <!-- Info Bar -->
+                <div id="info-bar" class="info-bar">
+                    <span>Protection: --</span>
+                    <span>Mode: --</span>
+                    <span>Temp: --</span>
+                </div>
+                <br>
+
+                <!-- Actual Values -->
+                <div class="my-container">
+                    <span>Actual Values | القراءات الفعلية</span>
+                    <table>
+                        <tr>
+                            <td class="segment-label description">Voltage | الفولت:</td>
+                            <td><canvas id="actVoltage" width="120" height="34"></canvas></td>
+                            <td class="segment-label unit colored-voltage">V</td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Current | التيار:</td>
+                            <td><canvas id="actCurrent" width="140" height="34"></canvas></td>
+                            <td class="segment-label unit colored-current">A</td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Power | القدرة:</td>
+                            <td><canvas id="actPower" width="140" height="34"></canvas></td>
+                            <td class="segment-label unit colored-power">W</td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Input Voltage | جهد الدخل:</td>
+                            <td><canvas id="inputVoltage" width="120" height="34"></canvas></td>
+                            <td class="segment-label unit" style="color: #ffffa0">V</td>
+                        </tr>
+                    </table>
+                </div>
+                <br>
+
+                <!-- Target/Limit Values -->
+                <div class="my-container">
+                    <span>Limits | الحدود</span>
+                    <table>
+                        <tr>
+                            <td class="segment-label description">Voltage | الفولت:</td>
+                            <td><canvas id="targetVoltage" width="120" height="34"></canvas></td>
+                            <td class="segment-label unit">V</td>
+                            <td>
+                                <button class="small-button" id="set-voltage-button"
+                                    onclick="setTargetValue(this.id)">SET | ضبط</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Current | التيار:</td>
+                            <td><canvas id="targetCurrent" width="140" height="34"></canvas></td>
+                            <td class="segment-label unit">A</td>
+                            <td>
+                                <button class="small-button" id="set-current-button"
+                                    onclick="setTargetValue(this.id)">SET | ضبط</button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Power | القدرة:</td>
+                            <td><canvas id="targetPower" width="140" height="34"></canvas></td>
+                            <td class="segment-label unit">W</td>
+                            <td>
+                                <button class="small-button" id="set-power-button"
+                                    onclick="setTargetValue(this.id)">SET | ضبط</button>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <br>
+
+                <div class="my-container">
+                    <span>Device Settings | إعدادات الجهاز</span>
+                    <table>
+                        <tr>
+                            <td class="segment-label description">Key Lock | قفل الأزرار:</td>
+                            <td>
+                                <select id="set-key-lock" class="connection-select" style="min-width: 140px;">
+                                    <option value="0">Unlocked | غير مقفل</option>
+                                    <option value="1">Locked | مقفل</option>
+                                </select>
+                            </td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Temp Unit | وحدة الحرارة:</td>
+                            <td>
+                                <select id="set-temp-unit" class="connection-select" style="min-width: 140px;">
+                                    <option value="0">Celsius (C)</option>
+                                    <option value="1">Fahrenheit (F)</option>
+                                </select>
+                            </td>
+                            <td><button class="small-button" onclick="saveSettings()">Apply | تطبيق</button></td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Backlight | الإضاءة:</td>
+                            <td><input id="set-backlight" class="connection-input" type="number" min="0" max="5" value="5"></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Sleep min | وقت السكون:</td>
+                            <td><input id="set-sleep" class="connection-input" type="number" min="0" max="120" value="0"></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Buzzer | الجرس:</td>
+                            <td>
+                                <select id="set-buzzer" class="connection-select" style="min-width: 140px;">
+                                    <option value="1">On | تشغيل</option>
+                                    <option value="0">Off | إيقاف</option>
+                                </select>
+                            </td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td class="segment-label description">Memory Mx | الذاكرة:</td>
+                            <td><input id="set-memory" class="connection-input" type="number" min="0" max="9" value="0"></td>
+                            <td><button class="small-button" onclick="recallMemory()">Recall | استدعاء</button></td>
+                        </tr>
+                    </table>
+                    <div id="settings-status" class="port-description"></div>
+                </div>
+
+                <br>
+
+                <div class="my-container">
+                    <span>Model Notes | ملاحظات الموديل</span>
+                    <div id="model-notes" class="model-notes">Loading... | جاري التحميل...</div>
+                </div>
+
+            </div>
+            <!-- end controls-section -->
+
+            <br>
+            <div class="port-description" style="margin-top: 20px; color: #555;">
+                XY6020 Serial Controller — Works on Windows &amp; Raspberry Pi 5 | يعمل على ويندوز وراسبيري باي
+            </div>
+
+        </div>
+    </center>
+
+</body>
+
+</html>

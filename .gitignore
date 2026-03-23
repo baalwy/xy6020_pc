@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# PlatformIO / Arduino bridge artifacts
+arduino_nano_ttl_bridge/.pio/
+arduino_nano_ttl_bridge/.vscode/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+*.log
+
+# Build / cache
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+htmlcov/

@@ -38,7 +38,7 @@ class XY6020Register:
     MODEL = 0x0016                # MODEL: Product number
     FIRMWARE_VERSION = 0x0017     # VERSION: Firmware version
     SLAVE_ADDRESS = 0x0018        # SLAVE-ADD: Slave address
-    BAUDRATE = 0x0019             # BAUDRATE: Baud rate code (6=115200)
+    BAUDRATE = 0x0019             # BAUDRATE: Baud rate code (0=1200..6=115200, default 6)
     INTERNAL_TEMP_OFFSET = 0x001A # T-IN-OFFSET
     EXTERNAL_TEMP_OFFSET = 0x001B # T-EX-OFFSET
     BUZZER = 0x001C               # BUZZER: Buzzer switch
@@ -74,10 +74,11 @@ class XY6020Driver:
         2: 4800,
         3: 9600,
         4: 19200,
-        5: 38400,
-        6: 57600,
-        7: 115200,
+        5: 57600,
+        6: 115200,
     }
+
+    BAUD_RATE_TO_CODE = {v: k for k, v in BAUD_CODE_TO_RATE.items()}
 
     @staticmethod
     def list_serial_ports():
@@ -95,6 +96,89 @@ class XY6020Driver:
             })
         return ports
 
+    # Baud rates to try during auto-detection (most common first)
+    AUTO_BAUD_RATES = [115200, 38400, 57600, 9600, 19200, 4800, 2400, 1200]
+
+    def _is_arduino_port(self, port):
+        """Check if a port is likely an Arduino (by VID/PID)."""
+        try:
+            for port_info in serial.tools.list_ports.comports():
+                if port_info.device == port:
+                    # Arduino VIDs: 0x2341 (Arduino), 0x1A86 (CH340), 0x10C4 (CP2102)
+                    if port_info.vid in (0x2341, 0x1A86, 0x10C4):
+                        return True
+                    desc = (port_info.description or '').lower()
+                    if 'arduino' in desc or 'ch340' in desc:
+                        return True
+        except Exception:
+            pass
+        return False
+
+    def _open_serial(self, port, slave_address, baudrate):
+        """
+        Open serial port with proper DTR/RTS control.
+        Returns a minimalmodbus.Instrument or raises an exception.
+        """
+        # Let minimalmodbus open the port, then configure it
+        instrument = minimalmodbus.Instrument(port, slave_address)
+        instrument.serial.baudrate = baudrate
+        instrument.serial.bytesize = 8
+        instrument.serial.parity = serial.PARITY_NONE
+        instrument.serial.stopbits = 1
+        instrument.serial.timeout = 1.0
+        instrument.mode = minimalmodbus.MODE_RTU
+        instrument.clear_buffers_before_each_transaction = True
+
+        # Set DTR/RTS low after opening to avoid resetting Arduino
+        # and to prevent interference with FTDI adapters
+        try:
+            instrument.serial.dtr = False
+            instrument.serial.rts = False
+        except Exception:
+            pass  # Some ports don't support explicit DTR/RTS control
+
+        return instrument
+
+    def _try_connect_at_baud(self, port, slave_address, baudrate, max_attempts=3):
+        """
+        Try to connect at a specific baud rate.
+        Returns (instrument, model) on success, or (None, error_msg) on failure.
+        """
+        try:
+            instrument = self._open_serial(port, slave_address, baudrate)
+        except Exception as e:
+            return None, str(e)
+
+        # Wait for Arduino reset if needed, shorter wait for direct adapters
+        is_arduino = self._is_arduino_port(port)
+        if is_arduino:
+            time.sleep(2.0)
+        else:
+            time.sleep(0.2)
+
+        # Clear any stale data in buffers
+        try:
+            instrument.serial.reset_input_buffer()
+            instrument.serial.reset_output_buffer()
+        except Exception:
+            pass
+
+        last_error = None
+        for attempt in range(max_attempts):
+            try:
+                model = instrument.read_register(XY6020Register.MODEL)
+                return instrument, model
+            except Exception as e:
+                last_error = e
+                time.sleep(0.15)
+
+        # Failed - close port
+        try:
+            instrument.serial.close()
+        except Exception:
+            pass
+        return None, str(last_error)
+
     def connect(self, port, slave_address=1, baudrate=115200):
         """
         Connect to XY6020 via the specified serial port.
@@ -102,7 +186,7 @@ class XY6020Driver:
         Args:
             port: Serial port name (e.g., 'COM9' on Windows, '/dev/ttyUSB0' on RPi)
             slave_address: Modbus slave address (default: 1)
-            baudrate: Baud rate (default: 115200)
+            baudrate: Baud rate (default: 115200). Use 0 or 'auto' for auto-detection.
 
         Returns:
             dict with 'success' and 'message' keys
@@ -111,49 +195,52 @@ class XY6020Driver:
             if self._connected:
                 self.disconnect_internal()
 
+            # Determine baud rates to try
+            if baudrate == 0 or baudrate == 'auto':
+                baud_list = self.AUTO_BAUD_RATES
+                print(f"[XY6020] Auto-detecting baud rate on {port}...")
+            else:
+                # Try requested baud first, then fall back to auto-detect
+                baud_list = [baudrate] + [b for b in self.AUTO_BAUD_RATES if b != baudrate]
+                print(f"[XY6020] Connecting on {port} at {baudrate} (with auto-fallback)...")
+
             try:
-                self._instrument = minimalmodbus.Instrument(port, slave_address)
-                self._instrument.serial.baudrate = baudrate
-                self._instrument.serial.bytesize = 8
-                self._instrument.serial.parity = serial.PARITY_NONE
-                self._instrument.serial.stopbits = 1
-                self._instrument.serial.timeout = 1.0
-                self._instrument.mode = minimalmodbus.MODE_RTU
-                self._instrument.clear_buffers_before_each_transaction = True
+                for baud in baud_list:
+                    print(f"[XY6020] Trying {port} @ {baud} baud...")
+                    instrument, result = self._try_connect_at_baud(port, slave_address, baud)
 
-                # Arduino Nano auto-resets on serial open; wait for bridge to boot.
-                time.sleep(2.0)
-
-                # Try reading model register multiple times (SoftwareSerial
-                # at 115200 may lose a frame or two initially).
-                last_error = None
-                for _ in range(6):
-                    try:
-                        model = self._instrument.read_register(XY6020Register.MODEL)
+                    if instrument is not None:
+                        model = result
+                        self._instrument = instrument
                         self._connected = True
                         self._port = port
                         self._slave_address = slave_address
                         self._read_error_count = 0
+                        print(f"[XY6020] Connected! Port={port}, Baud={baud}, Model=0x{model:04X}")
                         return {
                             'success': True,
-                            'message': f'Connected to XY6020 on {port} (Model: 0x{model:04X})'
+                            'message': f'Connected to XY6020 on {port} @ {baud} baud (Model: 0x{model:04X})',
+                            'baudrate': baud
                         }
-                    except Exception as e:
-                        last_error = e
-                        time.sleep(0.2)
+                    else:
+                        print(f"[XY6020]   {baud} baud failed: {result}")
 
-                self._instrument.serial.close()
-                self._instrument = None
                 return {
                     'success': False,
-                    'message': f'Device not responding on {port}: {str(last_error)}'
+                    'message': f'Device not responding on {port} at any baud rate. Check wiring and power.'
                 }
 
             except Exception as e:
                 self._instrument = None
+                msg = str(e)
+                if 'PermissionError' in msg or 'Access is denied' in msg:
+                    msg = (
+                        f'Port {port} is busy (Access denied). '
+                        'Close any Serial Monitor/PlatformIO/Arduino app using this port, then retry.'
+                    )
                 return {
                     'success': False,
-                    'message': f'Failed to open port {port}: {str(e)}'
+                    'message': f'Failed to open port {port}: {msg}'
                 }
 
     def disconnect_internal(self):

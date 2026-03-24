@@ -79,7 +79,16 @@ def connect():
 
     port = data['port']
     slave_address = data.get('slave_address', 1)
-    baudrate = data.get('baudrate', 115200)
+    baudrate = data.get('baudrate', 0)  # Default to auto-detect
+
+    # Support 'auto' string or 0 for auto-detection
+    if isinstance(baudrate, str) and baudrate.lower() == 'auto':
+        baudrate = 0
+    else:
+        try:
+            baudrate = int(baudrate)
+        except (ValueError, TypeError):
+            baudrate = 0
 
     result = xy.connect(port, slave_address, baudrate)
     status_code = 200 if result['success'] else 500

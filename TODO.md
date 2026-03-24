@@ -1,19 +1,18 @@
-# XY6020 PC/RPi Serial Controller - TODO
+# XY6020 Connection Fix - TODO
 
-## خطوات التنفيذ:
+## Root Cause (FIXED)
+- BAUD_CODE_TO_RATE mapping was wrong (had code 7=115200, but GY21208.docx says code 6=115200)
+- XY6020 baud rate was changed from default — needs reset via `set_baudrate.py`
 
-- [x] 1. إنشاء `requirements.txt` مع المتطلبات
-- [x] 2. إنشاء `xy6020_driver.py` - درايفر Modbus RTU للتواصل مع XY6020
-- [x] 3. إنشاء `app.py` - سيرفر Flask الرئيسي مع API endpoints
-- [x] 4. إنشاء `static/segment-display.js` - نسخة من ملف العرض الأصلي
-- [x] 5. إنشاء `static/style.css` - التصميم مع إضافات لوحة الاتصال
-- [x] 6. إنشاء `static/logic.js` - المنطق المعدل للعمل مع Flask API
-- [x] 7. إنشاء `static/index.html` - واجهة الويب مع لوحة الاتصال التسلسلي
-- [x] 8. إنشاء `run.py` - سكربت التشغيل المتوافق مع Windows و Raspberry Pi 5
-- [ ] 9. إنشاء `README.md` - توثيق المشروع
-- [ ] 10. اختبار التشغيل
+## Completed
+- [x] Fix BAUD_CODE_TO_RATE mapping (0=1200..6=115200, per GY21208.docx)
+- [x] Add BAUD_RATE_TO_CODE reverse mapping  
+- [x] Create `set_baudrate.py` to auto-detect and reset baud rate
+- [x] Auto-baud detection in connect()
+- [x] DTR/RTS control
+- [x] Arduino delay conditional
+- [x] "Auto" option in baudrate selector UI
 
-## ملاحظات التوافق:
-- Windows: منافذ COM (COM1, COM2, ...)
-- Raspberry Pi 5: منافذ /dev/ttyUSB0, /dev/ttyAMA0, /dev/serial0, ...
-- استخدام serial.tools.list_ports للكشف التلقائي عن المنافذ
+## Remaining
+- [ ] Run `set_baudrate.py` to reset module to 115200
+- [ ] Verify web UI connects smoothly at 115200

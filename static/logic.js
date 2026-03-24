@@ -113,16 +113,29 @@ function toggleConnection() {
 function connectDevice() {
     var port = document.getElementById("port-select").value;
     var slaveAddr = parseInt(document.getElementById("slave-address").value) || 1;
-    var baudrate = parseInt(document.getElementById("baudrate").value) || 115200;
+    var baudrateVal = document.getElementById("baudrate").value;
+
+    // Support "auto" or numeric baud rate
+    var baudrate;
+    if (baudrateVal === "auto") {
+        baudrate = "auto";
+    } else {
+        baudrate = parseInt(baudrateVal) || 0;
+    }
 
     if (!port) {
         setStatusMessage(bi("Please select a serial port", "يرجى اختيار منفذ تسلسلي"), "error");
         return;
     }
 
-    setStatusMessage(bi("Connecting...", "جارٍ الاتصال..."), "connecting");
+    var connectMsg = bi("Connecting (auto-detecting baud rate)...", "جارٍ الاتصال (كشف تلقائي للسرعة)...");
+    if (baudrate !== "auto" && baudrate > 0) {
+        connectMsg = bi("Connecting at " + baudrate + "...", "جارٍ الاتصال على " + baudrate + "...");
+    }
+    setStatusMessage(connectMsg, "connecting");
 
     var xhttp = new XMLHttpRequest();
+    xhttp.timeout = 30000; // 30s timeout for auto-detect
     xhttp.onreadystatechange = function () {
         if (this.readyState == 4) {
             var data = JSON.parse(this.responseText);
@@ -138,6 +151,9 @@ function connectDevice() {
                 setStatusMessage(data.message, "error");
             }
         }
+    };
+    xhttp.ontimeout = function () {
+        setStatusMessage(bi("Connection timed out", "انتهت مهلة الاتصال"), "error");
     };
     xhttp.open("POST", server_ip + "/api/connect", true);
     xhttp.setRequestHeader("Content-Type", "application/json");
